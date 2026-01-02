@@ -1,3 +1,9 @@
+// ✅ FIX Baileys: "crypto is not defined" (Railway / Node)
+const nodeCrypto = require("crypto");
+if (!globalThis.crypto) {
+  globalThis.crypto = nodeCrypto.webcrypto;
+}
+
 const makeWASocket = require("@whiskeysockets/baileys").default;
 const {
   useMultiFileAuthState,
@@ -22,7 +28,7 @@ const { startScheduler } = require("./lib/scheduler");
 // ✅ Railway
 const PORT = process.env.PORT || 3000;
 
-// ✅ Auth path bisa diubah lewat env supaya gampang reset session
+// ✅ Auth path bisa diganti untuk reset session
 // contoh: AUTH_PATH=/app/auth2
 const AUTH_PATH = process.env.AUTH_PATH || "/app/auth";
 
@@ -137,7 +143,7 @@ async function startBot() {
 
       isConnecting = false;
 
-      // ✅ reconnect delay (anti loop crash)
+      // ✅ reconnect delay
       console.log("🔁 Reconnecting in 5 seconds...");
       setTimeout(() => startBot().catch(console.error), 5000);
     }
