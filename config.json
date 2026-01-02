@@ -11,5 +11,9 @@
   "closeHourWIB": 22,
   "caseExpireMinutes": 10,
   "violationWindowMinutes": 10,
-  "riskAlertThreshold": 3
+  "riskAlertThreshold": 3,
+
+  "adminLogGroupId": "",
+  "kickAnnounceInGroup": true,
+  "autoDeleteViolationMessage": true
 }
