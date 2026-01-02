@@ -9,7 +9,6 @@
   ],
   "defaultTimezone": "WIB",
   "closeHourWIB": 22,
-  "reminderMinutesBeforeClose": 15,
   "caseExpireMinutes": 10,
   "violationWindowMinutes": 10,
   "riskAlertThreshold": 3
