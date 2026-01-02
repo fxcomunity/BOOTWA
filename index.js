@@ -32,7 +32,11 @@ const { canCheck } = require("./lib/nsfwLimiter");
 
 // ✅ Railway
 const PORT = process.env.PORT || 3000;
-const AUTH_PATH = process.env.AUTH_PATH || "/app/auth";
+
+// ✅ FIX: pakai /tmp/auth (Railway friendly)
+const AUTH_PATH = process.env.AUTH_PATH || "/tmp/auth";
+
+console.log("✅ AUTH_PATH:", AUTH_PATH);
 
 // ✅ QR storage (in-memory)
 let latestQR = null;
@@ -120,12 +124,10 @@ app.get("/health", (req, res) => {
     time: new Date().toISOString(),
     queueLength: notifyQueue.length,
     queueRunning,
+    AUTH_PATH,
     env: {
-      AUTH_PATH: process.env.AUTH_PATH || null,
       SIGHTENGINE_USER: process.env.SIGHTENGINE_USER ? "OK" : "EMPTY",
       SIGHTENGINE_SECRET: process.env.SIGHTENGINE_SECRET ? "OK" : "EMPTY",
-      NSFW_THRESHOLD: process.env.NSFW_THRESHOLD || null,
-      NSFW_MAX_PER_MINUTE: process.env.NSFW_MAX_PER_MINUTE || null,
     },
   });
 });
@@ -150,13 +152,11 @@ app.get("/qr", async (req, res) => {
   }
 });
 
-// ✅ QR string endpoint
 app.get("/qr-text", (req, res) => {
   if (!latestQR) return res.status(404).send("QR belum tersedia.");
   res.send(`QR STRING:\n\n${latestQR}\n\nGenerated: ${lastQRTime}`);
 });
 
-// ✅ QR HTML endpoint
 app.get("/qr-view", async (req, res) => {
   if (!latestQRDataURL) return res.status(404).send("QR belum tersedia.");
 
@@ -218,7 +218,7 @@ async function safeDeleteMessage(sock, groupId, key) {
     if (!key) return false;
     await sock.sendMessage(groupId, { delete: key });
     return true;
-  } catch (e) {
+  } catch {
     return false;
   }
 }
@@ -233,7 +233,15 @@ async function startBot() {
   if (isConnecting) return;
   isConnecting = true;
 
-  fs.mkdirSync(AUTH_PATH, { recursive: true });
+  // ✅ FIX mkdir safe (anti EEXIST + kalau path ternyata file)
+  try {
+    if (fs.existsSync(AUTH_PATH) && !fs.lstatSync(AUTH_PATH).isDirectory()) {
+      fs.unlinkSync(AUTH_PATH);
+    }
+    fs.mkdirSync(AUTH_PATH, { recursive: true });
+  } catch (e) {
+    if (e.code !== "EEXIST") throw e;
+  }
 
   console.log("✅ Using AUTH_PATH:", AUTH_PATH);
 
@@ -264,11 +272,7 @@ async function startBot() {
       qrcodeTerminal.generate(qr, { small: false });
 
       try {
-        latestQRDataURL = await QRCode.toDataURL(qr, {
-          width: 520,
-          margin: 4,
-          errorCorrectionLevel: "H",
-        });
+        latestQRDataURL = await QRCode.toDataURL(qr, { width: 520, margin: 4, errorCorrectionLevel: "H" });
       } catch {}
     }
 
@@ -308,7 +312,7 @@ async function startBot() {
     }
   });
 
-  // ✅ Message handler
+  // ✅ Message handler (bagian lo yg udah ada tetap)
   sock.ev.on("messages.upsert", async ({ messages }) => {
     try {
       const msg = messages?.[0];
@@ -316,7 +320,6 @@ async function startBot() {
 
       const from = msg.key.remoteJid;
 
-      // ✅ Admin DM decisions
       if (!from.endsWith("@g.us")) {
         await handleAdminDecision(sock, msg).catch(() => {});
         return;
@@ -325,7 +328,6 @@ async function startBot() {
       const sender = msg.key.participant;
       if (!sender) return;
 
-      // ✅ bypass admin sender
       if (config.admins.includes(sender)) return;
 
       const text =
@@ -337,14 +339,8 @@ async function startBot() {
 
       const bannedWords = getBannedWords();
 
-      // ✅ Step 1: text/link check
-      let violation = detectViolation({
-        text,
-        allowedGroupLink: config.allowedGroupLink,
-        bannedWords,
-      });
+      let violation = detectViolation({ text, allowedGroupLink: config.allowedGroupLink, bannedWords });
 
-      // ✅ Step 2: caption keyword check for media
       const isSticker = !!msg.message?.stickerMessage;
       const isImage = !!msg.message?.imageMessage;
       const isVideo = !!msg.message?.videoMessage;
@@ -354,7 +350,6 @@ async function startBot() {
         if (found) violation = { isViolation: true, type: "Media/Stiker Vulgar", evidence: found };
       }
 
-      // ✅ Step 3: NSFW AI check (Sightengine)
       if (!violation.isViolation && config.nsfwDetection?.enabled && (isSticker || isImage || isVideo)) {
         const maxPerMinute = Number(process.env.NSFW_MAX_PER_MINUTE || config.nsfwDetection.maxChecksPerMinute || 8);
 
@@ -378,19 +373,16 @@ async function startBot() {
 
       if (!violation.isViolation) return;
 
-      // ✅ throttle per grup
       const now = Date.now();
       if (lastNotifyByGroup[from] && now - lastNotifyByGroup[from] < GROUP_THROTTLE_MS) return;
       lastNotifyByGroup[from] = now;
 
-      // ✅ auto delete message
       if (config.autoDeleteViolationMessage) {
         await safeDeleteMessage(sock, from, msg.key);
       }
 
       const count = pushViolationCounter(from, config.violationWindowMinutes);
 
-      // ✅ group meta
       let groupName = from;
       const meta = await safeGroupMetadata(sock, from);
       if (meta?.subject) {
@@ -401,7 +393,6 @@ async function startBot() {
       const tz = getGroupSettings()[from]?.timezone || config.defaultTimezone;
       const timeStr = formatTimeNow(tz);
 
-      // ✅ create case
       const caseId = createCase(
         {
           groupId: from,
@@ -429,7 +420,6 @@ async function startBot() {
         { buttonId: `KICK_NO|${caseId}`, buttonText: { displayText: "❌ TIDAK" }, type: 1 },
       ];
 
-      // ✅ send to ONE admin only via queue
       const oneAdmin = pickOneAdmin();
       if (oneAdmin) {
         enqueueNotify({
@@ -439,7 +429,6 @@ async function startBot() {
         });
       }
 
-      // ✅ risk alert (1 admin)
       if (count >= config.riskAlertThreshold) {
         const oneAdmin2 = pickOneAdmin();
         if (oneAdmin2) {
@@ -464,9 +453,11 @@ async function startBot() {
   isConnecting = false;
 }
 
-// ✅ Start bot AFTER server already running (anti hang)
-startBot().catch((e) => {
-  console.error("❌ startBot fatal error:", e?.message || e);
-  isConnecting = false;
-  setTimeout(() => startBot().catch(console.error), 5000);
-});
+// ✅ Start bot
+setTimeout(() => {
+  startBot().catch((e) => {
+    console.error("❌ startBot fatal error:", e?.message || e);
+    isConnecting = false;
+    setTimeout(() => startBot().catch(console.error), 5000);
+  });
+}, 1500);
