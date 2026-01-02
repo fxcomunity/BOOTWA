@@ -15,5 +15,14 @@
 
   "adminLogGroupId": "",
   "kickAnnounceInGroup": true,
-  "autoDeleteViolationMessage": true
+  "autoDeleteViolationMessage": true,
+
+  "nsfwDetection": {
+    "enabled": true,
+    "provider": "sightengine",
+    "apiUser": "42068064",
+    "apiSecret": "hX7Aj8Ze6fZ6PybXJFZKk4h535mHHQhr",
+    "threshold": 0.65,
+    "maxChecksPerMinute": 8
+  }
 }
