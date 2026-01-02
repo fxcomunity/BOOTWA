@@ -1,17 +1,20 @@
 {
   "name": "wa-moderation-bot",
   "version": "1.0.0",
-  "description": "WhatsApp moderation bot (Baileys) - admin approval kick + group close scheduler",
+  "description": "WhatsApp moderation bot (Baileys) - Railway version",
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
     "start": "node index.js"
   },
+  "engines": {
+    "node": "18.x"
+  },
   "dependencies": {
     "@whiskeysockets/baileys": "^6.7.9",
-    "qrcode-terminal": "^0.12.0",
-    "pino": "^9.0.0",
     "express": "^4.19.2",
-    "moment-timezone": "^0.5.45"
+    "moment-timezone": "^0.5.45",
+    "pino": "^9.0.0",
+    "qrcode-terminal": "^0.12.0"
   }
 }
