@@ -15,6 +15,7 @@ const qrcodeTerminal = require("qrcode-terminal");
 const QRCode = require("qrcode");
 const express = require("express");
 const fs = require("fs");
+const path = require("path");
 
 const config = require("./config.json");
 
@@ -30,12 +31,14 @@ const { startScheduler } = require("./lib/scheduler");
 const { checkNSFW } = require("./lib/nsfwDetector");
 const { canCheck } = require("./lib/nsfwLimiter");
 
-// ✅ Railway
-const PORT = process.env.PORT || 3000;
+// ✅ Railway: PORT wajib ikut env (Railway biasanya 8080)
+const PORT = Number(process.env.PORT || 8080);
 
-// ✅ FIX: pakai /tmp/auth (Railway friendly)
+// ✅ auth path (Railway friendly)
 const AUTH_PATH = process.env.AUTH_PATH || "/tmp/auth";
 
+console.log("✅ Booting index.js...");
+console.log("✅ PORT:", PORT);
 console.log("✅ AUTH_PATH:", AUTH_PATH);
 
 // ✅ QR storage (in-memory)
@@ -43,13 +46,16 @@ let latestQR = null;
 let latestQRDataURL = null;
 let lastQRTime = null;
 
+// ✅ status flags
+let lastConnectionState = "init";
+let lastDisconnectReason = null;
+
 // ✅ ======================================
 // ✅ QUEUE SYSTEM (anti spam)
 // ✅ ======================================
 const notifyQueue = [];
 let queueRunning = false;
 
-// ✅ round robin admin
 let adminIndex = 0;
 function pickOneAdmin() {
   if (!config.admins || config.admins.length === 0) return null;
@@ -71,7 +77,6 @@ function enqueueNotify(job) {
 
   notifyQueue.push(job);
 
-  // ✅ limit queue biar gak numpuk
   const MAX_QUEUE = 50;
   if (notifyQueue.length > MAX_QUEUE) {
     notifyQueue.splice(0, notifyQueue.length - MAX_QUEUE);
@@ -97,15 +102,13 @@ async function runQueue() {
   queueRunning = false;
 }
 
-// ✅ throttle per grup (anti spam notif)
+// ✅ throttle per grup
 const lastNotifyByGroup = {};
 const GROUP_THROTTLE_MS = 20000;
 
 // ✅ ======================================
-// ✅ EXPRESS SERVER (MUST START FIRST)
+// ✅ EXPRESS SERVER (START FIRST)
 // ✅ ======================================
-console.log("✅ Booting index.js...");
-
 const app = express();
 
 app.get("/", (req, res) => {
@@ -114,7 +117,8 @@ app.get("/", (req, res) => {
       "Open /qr-view to scan QR (recommended)\n" +
       "Open /qr for png QR\n" +
       "Open /qr-text for QR string\n" +
-      "Open /health for status\n"
+      "Open /health for status\n" +
+      "Open /debug for bot debug\n"
   );
 });
 
@@ -128,18 +132,28 @@ app.get("/health", (req, res) => {
     env: {
       SIGHTENGINE_USER: process.env.SIGHTENGINE_USER ? "OK" : "EMPTY",
       SIGHTENGINE_SECRET: process.env.SIGHTENGINE_SECRET ? "OK" : "EMPTY",
+      PORT: process.env.PORT || null,
     },
   });
 });
 
-// ✅ QR image endpoint
+app.get("/debug", (req, res) => {
+  res.json({
+    qrAvailable: !!latestQR,
+    lastQRTime,
+    lastConnectionState,
+    lastDisconnectReason,
+  });
+});
+
+// ✅ QR PNG endpoint
 app.get("/qr", async (req, res) => {
   try {
     if (!latestQR) return res.status(404).send("QR belum tersedia. Tunggu bot generate QR.");
 
     const pngBuffer = await QRCode.toBuffer(latestQR, {
       type: "png",
-      width: 800,
+      width: 900,
       margin: 6,
       errorCorrectionLevel: "H",
     });
@@ -183,6 +197,7 @@ app.get("/qr-view", async (req, res) => {
             <button onclick="location.reload()">🔄 Reload</button>
             <a class="secondary" href="/qr" target="_blank">📥 PNG HD</a>
             <a class="secondary" href="/qr-text" target="_blank">📌 QR Text</a>
+            <a class="secondary" href="/debug" target="_blank">🧠 Debug</a>
           </div>
           <p>Generated: <code>${lastQRTime}</code></p>
           <p>Queue: <code>${notifyQueue.length}</code></p>
@@ -192,8 +207,8 @@ app.get("/qr-view", async (req, res) => {
   `);
 });
 
-// ✅ LISTEN FIRST (ANTI "failed to respond")
-app.listen(PORT, () => {
+// ✅ LISTEN (0.0.0.0 supaya Railway bisa detect)
+app.listen(PORT, "0.0.0.0", () => {
   console.log("✅ HTTP server running on", PORT);
 });
 
@@ -201,9 +216,7 @@ app.listen(PORT, () => {
 process.on("unhandledRejection", (reason) => console.error("❌ Unhandled Rejection:", reason));
 process.on("uncaughtException", (err) => console.error("❌ Uncaught Exception:", err));
 
-// ✅ ======================================
-// ✅ BOT HELPERS
-// ✅ ======================================
+// ✅ Helpers
 async function safeGroupMetadata(sock, groupId) {
   try {
     return await sock.groupMetadata(groupId);
@@ -230,20 +243,20 @@ let schedulerStarted = false;
 let isConnecting = false;
 
 async function startBot() {
+  console.log("🚀 startBot() called...");
+
   if (isConnecting) return;
   isConnecting = true;
 
-  // ✅ FIX mkdir safe (anti EEXIST + kalau path ternyata file)
+  // ✅ mkdir safe
   try {
     if (fs.existsSync(AUTH_PATH) && !fs.lstatSync(AUTH_PATH).isDirectory()) {
       fs.unlinkSync(AUTH_PATH);
     }
     fs.mkdirSync(AUTH_PATH, { recursive: true });
   } catch (e) {
-    if (e.code !== "EEXIST") throw e;
+    console.error("mkdir AUTH_PATH error:", e?.message || e);
   }
-
-  console.log("✅ Using AUTH_PATH:", AUTH_PATH);
 
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_PATH);
   const { version } = await fetchLatestBaileysVersion();
@@ -252,7 +265,7 @@ async function startBot() {
 
   const sock = makeWASocket({
     version,
-    logger: P({ level: "silent" }),
+    logger: P({ level: "info" }), // ✅ IMPORTANT biar error keliatan
     auth: state,
     printQRInTerminal: true,
     markOnlineOnConnect: false,
@@ -264,22 +277,33 @@ async function startBot() {
   sock.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect, qr } = update;
 
+    lastConnectionState = connection || lastConnectionState;
+
+    console.log("🔌 connection.update:", { connection, hasQR: !!qr });
+
     if (qr) {
       latestQR = qr;
       lastQRTime = new Date().toISOString();
 
-      console.log("📌 QR generated. Open /qr-view to scan:");
+      console.log("📌 QR generated! Open /qr-view to scan.");
       qrcodeTerminal.generate(qr, { small: false });
 
       try {
-        latestQRDataURL = await QRCode.toDataURL(qr, { width: 520, margin: 4, errorCorrectionLevel: "H" });
-      } catch {}
+        latestQRDataURL = await QRCode.toDataURL(qr, {
+          width: 520,
+          margin: 4,
+          errorCorrectionLevel: "H",
+        });
+      } catch (e) {
+        console.error("QRCode.toDataURL error:", e?.message || e);
+      }
     }
 
     if (connection === "open") {
       console.log("✅ Connected to WhatsApp!");
       latestQR = null;
       latestQRDataURL = null;
+      lastDisconnectReason = null;
 
       if (!schedulerStarted) {
         schedulerStarted = true;
@@ -298,6 +322,8 @@ async function startBot() {
       const code = lastDisconnect?.error?.output?.statusCode;
       const reason = lastDisconnect?.error?.message || lastDisconnect?.error?.toString();
 
+      lastDisconnectReason = { code, reason };
+
       console.log("⚠️ Connection closed:", code);
       console.log("📌 Close reason:", reason);
 
@@ -312,7 +338,7 @@ async function startBot() {
     }
   });
 
-  // ✅ Message handler (bagian lo yg udah ada tetap)
+  // ✅ Message handler (keep as your current logic)
   sock.ev.on("messages.upsert", async ({ messages }) => {
     try {
       const msg = messages?.[0];
@@ -339,7 +365,11 @@ async function startBot() {
 
       const bannedWords = getBannedWords();
 
-      let violation = detectViolation({ text, allowedGroupLink: config.allowedGroupLink, bannedWords });
+      let violation = detectViolation({
+        text,
+        allowedGroupLink: config.allowedGroupLink,
+        bannedWords,
+      });
 
       const isSticker = !!msg.message?.stickerMessage;
       const isImage = !!msg.message?.imageMessage;
@@ -453,7 +483,7 @@ async function startBot() {
   isConnecting = false;
 }
 
-// ✅ Start bot
+// ✅ Start bot after server running
 setTimeout(() => {
   startBot().catch((e) => {
     console.error("❌ startBot fatal error:", e?.message || e);
