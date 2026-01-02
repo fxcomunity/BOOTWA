@@ -244,6 +244,18 @@ async function safeGroupMetadata(sock, groupId) {
   }
 }
 
+// ✅ Auto delete message safely
+async function safeDeleteMessage(sock, groupId, key) {
+  try {
+    if (!key) return false;
+    await sock.sendMessage(groupId, { delete: key });
+    return true;
+  } catch (e) {
+    console.error("safeDeleteMessage error:", e?.message || e);
+    return false;
+  }
+}
+
 let schedulerStarted = false;
 let isConnecting = false;
 
@@ -383,6 +395,11 @@ async function startBot() {
       }
       lastNotifyByGroup[from] = now;
 
+      // ✅ AUTO DELETE pesan pelanggaran (link/media vulgar) jika enabled
+      if (config.autoDeleteViolationMessage) {
+        await safeDeleteMessage(sock, from, msg.key);
+      }
+
       const count = pushViolationCounter(from, config.violationWindowMinutes);
 
       let groupName = from;
@@ -395,7 +412,7 @@ async function startBot() {
       const tz = getGroupSettings()[from]?.timezone || config.defaultTimezone;
       const timeStr = formatTimeNow(tz);
 
-      // ✅ create case
+      // ✅ create case (tambahkan violationMsgKey untuk actionHandler)
       const caseId = createCase(
         {
           groupId: from,
@@ -405,6 +422,9 @@ async function startBot() {
           violationType: violation.type,
           evidence: violation.evidence,
           timeStr,
+
+          // ✅ penting untuk delete setelah kick / log
+          violationMsgKey: msg.key,
         },
         config.caseExpireMinutes
       );
