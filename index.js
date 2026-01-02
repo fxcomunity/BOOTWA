@@ -62,8 +62,9 @@ app.get("/qr", async (req, res) => {
 
     const pngBuffer = await QRCode.toBuffer(latestQR, {
       type: "png",
-      width: 420,
-      margin: 2,
+      width: 800,
+      margin: 6,
+      errorCorrectionLevel: "H",
     });
 
     res.setHeader("Content-Type", "image/png");
@@ -109,24 +110,17 @@ app.get("/qr-view", async (req, res) => {
             text-align:center;
             box-shadow:0 10px 25px rgba(0,0,0,.3);
             width:90%;
-            max-width:480px;
+            max-width:520px;
           }
           img {
             width: 100%;
-            max-width: 360px;
+            max-width: 420px;
             border-radius:12px;
             background:white;
-            padding:12px;
+            padding:14px;
           }
-          h2 {
-            margin: 0 0 12px;
-            font-size: 20px;
-          }
-          p {
-            margin: 10px 0 0;
-            font-size: 14px;
-            opacity:0.8;
-          }
+          h2 { margin: 0 0 12px; font-size: 20px; }
+          p { margin: 10px 0 0; font-size: 14px; opacity:0.8; }
           code {
             background:#0b1220;
             padding:4px 8px;
@@ -141,7 +135,9 @@ app.get("/qr-view", async (req, res) => {
             margin-top:16px;
             flex-wrap:wrap;
           }
-          a {
+          a, button {
+            border:0;
+            cursor:pointer;
             text-decoration:none;
             color:white;
             background:#2563eb;
@@ -150,18 +146,17 @@ app.get("/qr-view", async (req, res) => {
             font-size:14px;
             display:inline-block;
           }
-          a.secondary {
-            background:#334155;
-          }
+          a.secondary, button.secondary { background:#334155; }
         </style>
       </head>
       <body>
         <div class="card">
           <h2>Scan QR WhatsApp</h2>
-          <img src="${latestQRDataURL}" />
+          <img id="qrimg" src="/qr?t=${Date.now()}" />
           <div class="btns">
-            <a href="/qr" target="_blank">Download PNG</a>
-            <a class="secondary" href="/qr-text" target="_blank">QR Text</a>
+            <button onclick="location.reload()">🔄 Reload</button>
+            <a class="secondary" href="/qr" target="_blank">📥 PNG HD</a>
+            <a class="secondary" href="/qr-text" target="_blank">📌 QR Text</a>
           </div>
           <p>Jika QR expired, restart service Railway agar QR baru muncul.</p>
           <p>Generated: <code>${lastQRTime}</code></p>
@@ -231,10 +226,14 @@ async function startBot() {
       lastQRTime = new Date().toISOString();
 
       console.log("📌 QR generated. Open /qr-view to scan:");
-      qrcodeTerminal.generate(qr, { small: true });
+      qrcodeTerminal.generate(qr, { small: false });
 
       try {
-        latestQRDataURL = await QRCode.toDataURL(qr, { width: 360, margin: 2 });
+        latestQRDataURL = await QRCode.toDataURL(qr, {
+          width: 520,
+          margin: 4,
+          errorCorrectionLevel: "H",
+        });
       } catch (e) {
         console.error("QR DataURL error:", e?.message || e);
       }
@@ -264,7 +263,6 @@ async function startBot() {
 
       console.log("⚠️ Connection closed:", code);
       console.log("📌 Close reason:", reason);
-      console.log("📌 Full error:", lastDisconnect?.error);
 
       if (code === DisconnectReason.loggedOut) {
         console.log("❌ Logged out. Reset AUTH_PATH and scan QR again.");
@@ -311,7 +309,7 @@ async function startBot() {
         bannedWords,
       });
 
-      // ✅ media/sticker detection
+      // ✅ media/sticker detection (caption)
       const isSticker = !!msg.message?.stickerMessage;
       const isImage = !!msg.message?.imageMessage;
       const isVideo = !!msg.message?.videoMessage;
