@@ -12,7 +12,8 @@ const {
 } = require("@whiskeysockets/baileys");
 
 const P = require("pino");
-const qrcode = require("qrcode-terminal");
+const qrcodeTerminal = require("qrcode-terminal");
+const QRCode = require("qrcode");
 const express = require("express");
 const fs = require("fs");
 
@@ -27,26 +28,154 @@ const { startScheduler } = require("./lib/scheduler");
 
 // ✅ Railway
 const PORT = process.env.PORT || 3000;
-
-// ✅ Auth path bisa diganti untuk reset session
-// contoh: AUTH_PATH=/app/auth2
 const AUTH_PATH = process.env.AUTH_PATH || "/app/auth";
 
-// ✅ HTTP server (Railway wajib listen PORT)
+// ✅ QR storage (in-memory)
+let latestQR = null;
+let latestQRDataURL = null;
+let lastQRTime = null;
+
+// ✅ HTTP server
 const app = express();
-app.get("/", (req, res) => res.send("OK - WA Moderation Bot Running (Railway)"));
-app.get("/health", (req, res) =>
-  res.json({ ok: true, time: new Date().toISOString() })
-);
+
+// Home
+app.get("/", (req, res) => {
+  res.send(
+    "OK - WA Moderation Bot Running ✅\n\n" +
+      "Open /qr-view to scan QR (recommended)\n" +
+      "Open /qr for png QR\n" +
+      "Open /qr-text for QR string\n"
+  );
+});
+
+// Health
+app.get("/health", (req, res) => {
+  res.json({ ok: true, time: new Date().toISOString() });
+});
+
+// ✅ QR image endpoint
+app.get("/qr", async (req, res) => {
+  try {
+    if (!latestQR) {
+      return res.status(404).send("QR belum tersedia. Restart service / tunggu QR muncul.");
+    }
+
+    const pngBuffer = await QRCode.toBuffer(latestQR, {
+      type: "png",
+      width: 420,
+      margin: 2,
+    });
+
+    res.setHeader("Content-Type", "image/png");
+    res.send(pngBuffer);
+  } catch (e) {
+    console.error("QR endpoint error:", e?.message || e);
+    res.status(500).send("QR endpoint error");
+  }
+});
+
+// ✅ QR string endpoint
+app.get("/qr-text", (req, res) => {
+  if (!latestQR) return res.status(404).send("QR belum tersedia.");
+  res.send(`QR STRING:\n\n${latestQR}\n\nGenerated: ${lastQRTime}`);
+});
+
+// ✅ QR HTML endpoint (lebih bagus tampilannya)
+app.get("/qr-view", async (req, res) => {
+  if (!latestQRDataURL) {
+    return res.status(404).send("QR belum tersedia. Restart service / tunggu QR muncul.");
+  }
+
+  res.send(`
+    <html>
+      <head>
+        <title>Scan QR WhatsApp</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <style>
+          body {
+            font-family: Arial;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            height:100vh;
+            margin:0;
+            background:#0f172a;
+            color:white;
+          }
+          .card {
+            background:#111827;
+            padding:24px;
+            border-radius:16px;
+            text-align:center;
+            box-shadow:0 10px 25px rgba(0,0,0,.3);
+            width:90%;
+            max-width:480px;
+          }
+          img {
+            width: 100%;
+            max-width: 360px;
+            border-radius:12px;
+            background:white;
+            padding:12px;
+          }
+          h2 {
+            margin: 0 0 12px;
+            font-size: 20px;
+          }
+          p {
+            margin: 10px 0 0;
+            font-size: 14px;
+            opacity:0.8;
+          }
+          code {
+            background:#0b1220;
+            padding:4px 8px;
+            border-radius:8px;
+            display:inline-block;
+            margin-top:8px;
+          }
+          .btns {
+            display:flex;
+            gap:10px;
+            justify-content:center;
+            margin-top:16px;
+            flex-wrap:wrap;
+          }
+          a {
+            text-decoration:none;
+            color:white;
+            background:#2563eb;
+            padding:10px 14px;
+            border-radius:10px;
+            font-size:14px;
+            display:inline-block;
+          }
+          a.secondary {
+            background:#334155;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <h2>Scan QR WhatsApp</h2>
+          <img src="${latestQRDataURL}" />
+          <div class="btns">
+            <a href="/qr" target="_blank">Download PNG</a>
+            <a class="secondary" href="/qr-text" target="_blank">QR Text</a>
+          </div>
+          <p>Jika QR expired, restart service Railway agar QR baru muncul.</p>
+          <p>Generated: <code>${lastQRTime}</code></p>
+        </div>
+      </body>
+    </html>
+  `);
+});
+
 app.listen(PORT, () => console.log("✅ HTTP server running on", PORT));
 
 // ✅ Anti crash global
-process.on("unhandledRejection", (reason) => {
-  console.error("❌ Unhandled Rejection:", reason);
-});
-process.on("uncaughtException", (err) => {
-  console.error("❌ Uncaught Exception:", err);
-});
+process.on("unhandledRejection", (reason) => console.error("❌ Unhandled Rejection:", reason));
+process.on("uncaughtException", (err) => console.error("❌ Uncaught Exception:", err));
 
 // ✅ Safe send wrapper
 async function safeSend(sock, jid, payload) {
@@ -73,12 +202,7 @@ async function startBot() {
   if (isConnecting) return;
   isConnecting = true;
 
-  // ✅ Ensure auth path exists
-  try {
-    fs.mkdirSync(AUTH_PATH, { recursive: true });
-  } catch (e) {
-    console.error("❌ AUTH mkdir error:", e?.message || e);
-  }
+  fs.mkdirSync(AUTH_PATH, { recursive: true });
 
   console.log("✅ Using AUTH_PATH:", AUTH_PATH);
   console.log("✅ Using PORT:", PORT);
@@ -99,19 +223,28 @@ async function startBot() {
 
   sock.ev.on("creds.update", saveCreds);
 
-  // ✅ Connection update handler
   sock.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
-      console.log("📌 Scan QR to login:");
-      qrcode.generate(qr, { small: true });
+      latestQR = qr;
+      lastQRTime = new Date().toISOString();
+
+      console.log("📌 QR generated. Open /qr-view to scan:");
+      qrcodeTerminal.generate(qr, { small: true });
+
+      try {
+        latestQRDataURL = await QRCode.toDataURL(qr, { width: 360, margin: 2 });
+      } catch (e) {
+        console.error("QR DataURL error:", e?.message || e);
+      }
     }
 
     if (connection === "open") {
       console.log("✅ Connected!");
+      latestQR = null;
+      latestQRDataURL = null;
 
-      // ✅ scheduler start once
       if (!schedulerStarted) {
         schedulerStarted = true;
         try {
@@ -131,25 +264,20 @@ async function startBot() {
 
       console.log("⚠️ Connection closed:", code);
       console.log("📌 Close reason:", reason);
-      console.log("📌 Full error object:", lastDisconnect?.error);
+      console.log("📌 Full error:", lastDisconnect?.error);
 
-      // ✅ logged out
       if (code === DisconnectReason.loggedOut) {
-        console.log("❌ Logged out. Delete auth folder and scan QR again.");
-        console.log("👉 Cara cepat reset session:");
-        console.log("   Railway Variables: set AUTH_PATH=/app/auth2 lalu buat volume /app/auth2");
+        console.log("❌ Logged out. Reset AUTH_PATH and scan QR again.");
         return;
       }
 
       isConnecting = false;
-
-      // ✅ reconnect delay
       console.log("🔁 Reconnecting in 5 seconds...");
       setTimeout(() => startBot().catch(console.error), 5000);
     }
   });
 
-  // ✅ Single messages handler
+  // ✅ Message handler
   sock.ev.on("messages.upsert", async ({ messages }) => {
     try {
       const msg = messages?.[0];
@@ -157,24 +285,18 @@ async function startBot() {
 
       const from = msg.key.remoteJid;
 
-      // ✅ DM admin handler (button decisions)
+      // ✅ Admin DM decisions
       if (!from.endsWith("@g.us")) {
-        try {
-          await handleAdminDecision(sock, msg);
-        } catch (e) {
-          console.error("handleAdminDecision error:", e?.message || e);
-        }
+        await handleAdminDecision(sock, msg).catch(() => {});
         return;
       }
 
-      // ✅ group message
       const sender = msg.key.participant;
       if (!sender) return;
 
-      // ✅ bypass admin whitelist
+      // ✅ bypass admin
       if (config.admins.includes(sender)) return;
 
-      // ✅ text extraction
       const text =
         msg.message?.conversation ||
         msg.message?.extendedTextMessage?.text ||
@@ -182,7 +304,6 @@ async function startBot() {
         msg.message?.videoMessage?.caption ||
         "";
 
-      // ✅ moderation detect
       const bannedWords = getBannedWords();
       let violation = detectViolation({
         text,
@@ -190,7 +311,7 @@ async function startBot() {
         bannedWords,
       });
 
-      // ✅ media/sticker detection (caption contains banned word)
+      // ✅ media/sticker detection
       const isSticker = !!msg.message?.stickerMessage;
       const isImage = !!msg.message?.imageMessage;
       const isVideo = !!msg.message?.videoMessage;
@@ -203,10 +324,8 @@ async function startBot() {
 
       if (!violation.isViolation) return;
 
-      // ✅ counter
       const count = pushViolationCounter(from, config.violationWindowMinutes);
 
-      // ✅ group name cache
       let groupName = from;
       const meta = await safeGroupMetadata(sock, from);
       if (meta?.subject) {
@@ -214,11 +333,10 @@ async function startBot() {
         setGroupName(from, groupName);
       }
 
-      // ✅ timezone
       const tz = getGroupSettings()[from]?.timezone || config.defaultTimezone;
       const timeStr = formatTimeNow(tz);
 
-      // ✅ create case for admin approval
+      // ✅ create case
       const caseId = createCase(
         {
           groupId: from,
@@ -245,7 +363,7 @@ async function startBot() {
         { buttonId: `KICK_NO|${caseId}`, buttonText: { displayText: "❌ TIDAK" }, type: 1 },
       ];
 
-      // ✅ send alert to all admins (private DM)
+      // ✅ send to admins DM
       for (const admin of config.admins) {
         await safeSend(sock, admin, { text: panel, buttons, headerType: 1 });
       }
@@ -262,7 +380,6 @@ async function startBot() {
           });
         }
       }
-
     } catch (e) {
       console.error("messages.upsert error:", e?.message || e);
     }
