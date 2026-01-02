@@ -1,7 +1,7 @@
 {
   "name": "wa-moderation-bot",
   "version": "1.0.0",
-  "description": "WhatsApp moderation bot (Baileys) - Railway version",
+  "description": "WhatsApp moderation bot (Baileys) - Railway + QR Endpoint",
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
@@ -15,6 +15,7 @@
     "express": "^4.19.2",
     "moment-timezone": "^0.5.45",
     "pino": "^9.0.0",
+    "qrcode": "^1.5.3",
     "qrcode-terminal": "^0.12.0"
   }
 }
