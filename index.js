@@ -9,6 +9,7 @@ const {
   useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion,
+  downloadMediaMessage,
 } = require("@whiskeysockets/baileys");
 
 const P = require("pino");
@@ -25,6 +26,10 @@ const { buildViolationPanel } = require("./lib/uiPanel");
 const { formatTimeNow, jidToPhone } = require("./lib/helpers");
 const { handleAdminDecision, getGroupSettings, setGroupName } = require("./lib/actionHandler");
 const { startScheduler } = require("./lib/scheduler");
+
+// ✅ NSFW Sightengine
+const { checkNSFW } = require("./lib/nsfwDetector");
+const { canCheck } = require("./lib/nsfwLimiter");
 
 // ✅ Railway
 const PORT = process.env.PORT || 3000;
@@ -65,10 +70,10 @@ function enqueueNotify(job) {
 
   notifyQueue.push(job);
 
-  // ✅ optional: limit queue (biar gak numpuk kalau spam parah)
+  // ✅ optional: limit queue
   const MAX_QUEUE = 50;
   if (notifyQueue.length > MAX_QUEUE) {
-    notifyQueue.splice(0, notifyQueue.length - MAX_QUEUE); // keep latest
+    notifyQueue.splice(0, notifyQueue.length - MAX_QUEUE);
   }
 
   runQueue().catch(console.error);
@@ -81,7 +86,7 @@ async function runQueue() {
   while (notifyQueue.length > 0) {
     const job = notifyQueue.shift();
     try {
-      await sleep(randomDelay(3000, 8000)); // ✅ delay tiap job
+      await sleep(randomDelay(3000, 8000));
       await job.sock.sendMessage(job.toJid, job.payload);
     } catch (e) {
       console.error("QUEUE sendMessage error:", e?.message || e);
@@ -91,9 +96,9 @@ async function runQueue() {
   queueRunning = false;
 }
 
-// ✅ throttle per grup (anti spam admin)
+// ✅ throttle per grup
 const lastNotifyByGroup = {};
-const GROUP_THROTTLE_MS = 20000; // 20 detik per grup
+const GROUP_THROTTLE_MS = 20000;
 
 // ✅ Home
 app.get("/", (req, res) => {
@@ -118,9 +123,7 @@ app.get("/health", (req, res) => {
 // ✅ QR image endpoint
 app.get("/qr", async (req, res) => {
   try {
-    if (!latestQR) {
-      return res.status(404).send("QR belum tersedia. Restart service / tunggu QR muncul.");
-    }
+    if (!latestQR) return res.status(404).send("QR belum tersedia.");
 
     const pngBuffer = await QRCode.toBuffer(latestQR, {
       type: "png",
@@ -143,11 +146,9 @@ app.get("/qr-text", (req, res) => {
   res.send(`QR STRING:\n\n${latestQR}\n\nGenerated: ${lastQRTime}`);
 });
 
-// ✅ QR HTML endpoint (lebih bagus tampilannya)
+// ✅ QR VIEW
 app.get("/qr-view", async (req, res) => {
-  if (!latestQRDataURL) {
-    return res.status(404).send("QR belum tersedia. Restart service / tunggu QR muncul.");
-  }
+  if (!latestQRDataURL) return res.status(404).send("QR belum tersedia.");
 
   res.send(`
     <html>
@@ -155,72 +156,24 @@ app.get("/qr-view", async (req, res) => {
         <title>Scan QR WhatsApp</title>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <style>
-          body {
-            font-family: Arial;
-            display:flex;
-            align-items:center;
-            justify-content:center;
-            height:100vh;
-            margin:0;
-            background:#0f172a;
-            color:white;
-          }
-          .card {
-            background:#111827;
-            padding:24px;
-            border-radius:16px;
-            text-align:center;
-            box-shadow:0 10px 25px rgba(0,0,0,.3);
-            width:90%;
-            max-width:520px;
-          }
-          img {
-            width: 100%;
-            max-width: 420px;
-            border-radius:12px;
-            background:white;
-            padding:14px;
-          }
-          h2 { margin: 0 0 12px; font-size: 20px; }
-          p { margin: 10px 0 0; font-size: 14px; opacity:0.8; }
-          code {
-            background:#0b1220;
-            padding:4px 8px;
-            border-radius:8px;
-            display:inline-block;
-            margin-top:8px;
-          }
-          .btns {
-            display:flex;
-            gap:10px;
-            justify-content:center;
-            margin-top:16px;
-            flex-wrap:wrap;
-          }
-          a, button {
-            border:0;
-            cursor:pointer;
-            text-decoration:none;
-            color:white;
-            background:#2563eb;
-            padding:10px 14px;
-            border-radius:10px;
-            font-size:14px;
-            display:inline-block;
-          }
-          a.secondary, button.secondary { background:#334155; }
+          body {font-family: Arial; display:flex; align-items:center; justify-content:center; height:100vh; margin:0; background:#0f172a; color:white;}
+          .card {background:#111827; padding:24px; border-radius:16px; text-align:center; box-shadow:0 10px 25px rgba(0,0,0,.3); width:90%; max-width:520px;}
+          img {width:100%; max-width:420px; border-radius:12px; background:white; padding:14px;}
+          .btns {display:flex; gap:10px; justify-content:center; margin-top:16px; flex-wrap:wrap;}
+          a, button {border:0; cursor:pointer; text-decoration:none; color:white; background:#2563eb; padding:10px 14px; border-radius:10px; font-size:14px;}
+          a.secondary, button.secondary {background:#334155;}
+          code {background:#0b1220; padding:4px 8px; border-radius:8px;}
         </style>
       </head>
       <body>
         <div class="card">
           <h2>Scan QR WhatsApp</h2>
-          <img id="qrimg" src="/qr?t=${Date.now()}" />
+          <img src="/qr?t=${Date.now()}" />
           <div class="btns">
             <button onclick="location.reload()">🔄 Reload</button>
             <a class="secondary" href="/qr" target="_blank">📥 PNG HD</a>
             <a class="secondary" href="/qr-text" target="_blank">📌 QR Text</a>
           </div>
-          <p>Jika QR expired, restart service Railway agar QR baru muncul.</p>
           <p>Generated: <code>${lastQRTime}</code></p>
           <p>Queue: <code>${notifyQueue.length}</code></p>
         </div>
@@ -231,27 +184,23 @@ app.get("/qr-view", async (req, res) => {
 
 app.listen(PORT, () => console.log("✅ HTTP server running on", PORT));
 
-// ✅ Anti crash global
 process.on("unhandledRejection", (reason) => console.error("❌ Unhandled Rejection:", reason));
 process.on("uncaughtException", (err) => console.error("❌ Uncaught Exception:", err));
 
 async function safeGroupMetadata(sock, groupId) {
   try {
     return await sock.groupMetadata(groupId);
-  } catch (e) {
-    console.error("groupMetadata error:", e?.message || e);
+  } catch {
     return null;
   }
 }
 
-// ✅ Auto delete message safely
 async function safeDeleteMessage(sock, groupId, key) {
   try {
     if (!key) return false;
     await sock.sendMessage(groupId, { delete: key });
     return true;
-  } catch (e) {
-    console.error("safeDeleteMessage error:", e?.message || e);
+  } catch {
     return false;
   }
 }
@@ -265,13 +214,8 @@ async function startBot() {
 
   fs.mkdirSync(AUTH_PATH, { recursive: true });
 
-  console.log("✅ Using AUTH_PATH:", AUTH_PATH);
-  console.log("✅ Using PORT:", PORT);
-
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_PATH);
   const { version } = await fetchLatestBaileysVersion();
-
-  console.log("✅ Baileys version:", version);
 
   const sock = makeWASocket({
     version,
@@ -290,19 +234,11 @@ async function startBot() {
     if (qr) {
       latestQR = qr;
       lastQRTime = new Date().toISOString();
-
-      console.log("📌 QR generated. Open /qr-view to scan:");
       qrcodeTerminal.generate(qr, { small: false });
 
       try {
-        latestQRDataURL = await QRCode.toDataURL(qr, {
-          width: 520,
-          margin: 4,
-          errorCorrectionLevel: "H",
-        });
-      } catch (e) {
-        console.error("QR DataURL error:", e?.message || e);
-      }
+        latestQRDataURL = await QRCode.toDataURL(qr, { width: 520, margin: 4, errorCorrectionLevel: "H" });
+      } catch {}
     }
 
     if (connection === "open") {
@@ -312,36 +248,22 @@ async function startBot() {
 
       if (!schedulerStarted) {
         schedulerStarted = true;
-        try {
-          startScheduler(sock, config, getGroupSettings);
-          console.log("✅ Scheduler started once");
-        } catch (e) {
-          console.error("❌ Scheduler error:", e?.message || e);
-        }
+        startScheduler(sock, config, getGroupSettings);
       }
-
       isConnecting = false;
     }
 
     if (connection === "close") {
       const code = lastDisconnect?.error?.output?.statusCode;
-      const reason = lastDisconnect?.error?.message || lastDisconnect?.error?.toString();
-
       console.log("⚠️ Connection closed:", code);
-      console.log("📌 Close reason:", reason);
 
-      if (code === DisconnectReason.loggedOut) {
-        console.log("❌ Logged out. Reset AUTH_PATH and scan QR again.");
-        return;
-      }
+      if (code === DisconnectReason.loggedOut) return;
 
       isConnecting = false;
-      console.log("🔁 Reconnecting in 5 seconds...");
       setTimeout(() => startBot().catch(console.error), 5000);
     }
   });
 
-  // ✅ Message handler
   sock.ev.on("messages.upsert", async ({ messages }) => {
     try {
       const msg = messages?.[0];
@@ -358,7 +280,7 @@ async function startBot() {
       const sender = msg.key.participant;
       if (!sender) return;
 
-      // ✅ bypass admin
+      // ✅ bypass admin sender
       if (config.admins.includes(sender)) return;
 
       const text =
@@ -369,39 +291,61 @@ async function startBot() {
         "";
 
       const bannedWords = getBannedWords();
+
+      // ✅ Step 1: text/link check
       let violation = detectViolation({
         text,
         allowedGroupLink: config.allowedGroupLink,
         bannedWords,
       });
 
-      // ✅ media/sticker detection (caption)
+      // ✅ Step 2: media/sticker caption check
       const isSticker = !!msg.message?.stickerMessage;
       const isImage = !!msg.message?.imageMessage;
       const isVideo = !!msg.message?.videoMessage;
-      const isDoc = !!msg.message?.documentMessage;
 
-      if (!violation.isViolation && (isSticker || isImage || isVideo || isDoc)) {
+      if (!violation.isViolation && (isSticker || isImage || isVideo)) {
         const found = bannedWords.find((w) => text.toLowerCase().includes(w.toLowerCase()));
         if (found) violation = { isViolation: true, type: "Media/Stiker Vulgar", evidence: found };
+      }
+
+      // ✅ Step 3: NSFW Sightengine check (sticker/image/video TANPA caption)
+      if (!violation.isViolation && config.nsfwDetection?.enabled && (isSticker || isImage || isVideo)) {
+        const maxPerMinute = config.nsfwDetection.maxChecksPerMinute || 8;
+
+        if (canCheck(maxPerMinute)) {
+          try {
+            const buffer = await downloadMediaMessage(msg, "buffer", {});
+            const result = await checkNSFW(buffer, config.nsfwDetection);
+
+            if (result.isNSFW) {
+              violation = {
+                isViolation: true,
+                type: "Stiker/Media NSFW",
+                evidence: `NSFW Score: ${(result.score * 100).toFixed(1)}%`,
+              };
+            }
+          } catch (e) {
+            console.log("NSFW detect error:", e?.message || e);
+          }
+        }
       }
 
       if (!violation.isViolation) return;
 
       // ✅ throttle per grup
       const now = Date.now();
-      if (lastNotifyByGroup[from] && now - lastNotifyByGroup[from] < GROUP_THROTTLE_MS) {
-        return;
-      }
+      if (lastNotifyByGroup[from] && now - lastNotifyByGroup[from] < GROUP_THROTTLE_MS) return;
       lastNotifyByGroup[from] = now;
 
-      // ✅ AUTO DELETE pesan pelanggaran (link/media vulgar) jika enabled
+      // ✅ auto delete message (if bot admin)
       if (config.autoDeleteViolationMessage) {
         await safeDeleteMessage(sock, from, msg.key);
       }
 
       const count = pushViolationCounter(from, config.violationWindowMinutes);
 
+      // ✅ group meta
       let groupName = from;
       const meta = await safeGroupMetadata(sock, from);
       if (meta?.subject) {
@@ -412,7 +356,7 @@ async function startBot() {
       const tz = getGroupSettings()[from]?.timezone || config.defaultTimezone;
       const timeStr = formatTimeNow(tz);
 
-      // ✅ create case (tambahkan violationMsgKey untuk actionHandler)
+      // ✅ create case
       const caseId = createCase(
         {
           groupId: from,
@@ -422,8 +366,6 @@ async function startBot() {
           violationType: violation.type,
           evidence: violation.evidence,
           timeStr,
-
-          // ✅ penting untuk delete setelah kick / log
           violationMsgKey: msg.key,
         },
         config.caseExpireMinutes
@@ -452,7 +394,7 @@ async function startBot() {
         });
       }
 
-      // ✅ risk alert (1 admin only, via queue)
+      // ✅ risk alert (1 admin)
       if (count >= config.riskAlertThreshold) {
         const oneAdmin2 = pickOneAdmin();
         if (oneAdmin2) {
@@ -477,7 +419,6 @@ async function startBot() {
   isConnecting = false;
 }
 
-// ✅ start bot
 startBot().catch((e) => {
   console.error("❌ startBot fatal error:", e?.message || e);
   isConnecting = false;
