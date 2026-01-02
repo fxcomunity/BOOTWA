@@ -1,14 +1,17 @@
-# WA Moderation Bot (Railway)
+# WA Moderation Bot (Railway + QR Endpoint)
 
-## ✅ Deploy Railway
-1) Upload project ini ke GitHub
-2) Railway → New Project → Deploy from GitHub
-3) Add Volume supaya session tidak hilang:
-   - Railway → Settings → Volumes → Add Volume
-   - Mount path: /app/auth
-4) Deploy dan scan QR pertama kali di logs
-5) Bot harus admin grup untuk kick & tutup grup
+## Deploy Railway
+1) Push project ke GitHub
+2) Railway → Deploy from GitHub
+3) Buat Volume:
+   - mount: /app/auth
+4) Deploy
+5) Buka /qr-view untuk scan QR
+6) Bot harus jadi admin grup untuk Kick & Tutup grup.
 
-## ✅ Endpoint
-- GET / => OK
-- GET /health => JSON
+## Endpoints
+- / => info
+- /health => status
+- /qr => QR png
+- /qr-view => halaman QR bagus
+- /qr-text => string QR
