@@ -66,7 +66,6 @@ async function startBot() {
 
     if (connection === "open") {
       console.log("✅ Bot connected!");
-
       if (!schedulerStarted) {
         schedulerStarted = true;
         startScheduler(sock, config, getGroupSettings);
@@ -103,7 +102,6 @@ async function startBot() {
 
       const sender = msg.key.participant;
       if (!sender) return;
-
       if (config.admins.includes(sender)) return;
 
       const text =
