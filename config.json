@@ -7,8 +7,10 @@
     "601129323365@s.whatsapp.net",
     "6285701449359@s.whatsapp.net"
   ],
+
   "defaultTimezone": "WIB",
   "closeHourWIB": 22,
+
   "caseExpireMinutes": 10,
   "violationWindowMinutes": 10,
   "riskAlertThreshold": 3,
@@ -20,8 +22,6 @@
   "nsfwDetection": {
     "enabled": true,
     "provider": "sightengine",
-    "apiUser": "42068064",
-    "apiSecret": "hX7Aj8Ze6fZ6PybXJFZKk4h535mHHQhr",
     "threshold": 0.65,
     "maxChecksPerMinute": 8
   }
