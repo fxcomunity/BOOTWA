@@ -38,7 +38,64 @@ let lastQRTime = null;
 // ✅ HTTP server
 const app = express();
 
-// Home
+// ✅ ======================================
+// ✅ QUEUE SYSTEM (anti spam)
+// ✅ ======================================
+const notifyQueue = [];
+let queueRunning = false;
+
+let adminIndex = 0;
+function pickOneAdmin() {
+  if (!config.admins || config.admins.length === 0) return null;
+  const admin = config.admins[adminIndex % config.admins.length];
+  adminIndex++;
+  return admin;
+}
+
+function sleep(ms) {
+  return new Promise((res) => setTimeout(res, ms));
+}
+
+function randomDelay(min = 3000, max = 8000) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function enqueueNotify(job) {
+  if (!job?.sock || !job?.toJid || !job?.payload) return;
+
+  notifyQueue.push(job);
+
+  // ✅ optional: limit queue (biar gak numpuk kalau spam parah)
+  const MAX_QUEUE = 50;
+  if (notifyQueue.length > MAX_QUEUE) {
+    notifyQueue.splice(0, notifyQueue.length - MAX_QUEUE); // keep latest
+  }
+
+  runQueue().catch(console.error);
+}
+
+async function runQueue() {
+  if (queueRunning) return;
+  queueRunning = true;
+
+  while (notifyQueue.length > 0) {
+    const job = notifyQueue.shift();
+    try {
+      await sleep(randomDelay(3000, 8000)); // ✅ delay tiap job
+      await job.sock.sendMessage(job.toJid, job.payload);
+    } catch (e) {
+      console.error("QUEUE sendMessage error:", e?.message || e);
+    }
+  }
+
+  queueRunning = false;
+}
+
+// ✅ throttle per grup (anti spam admin)
+const lastNotifyByGroup = {};
+const GROUP_THROTTLE_MS = 20000; // 20 detik per grup
+
+// ✅ Home
 app.get("/", (req, res) => {
   res.send(
     "OK - WA Moderation Bot Running ✅\n\n" +
@@ -48,9 +105,14 @@ app.get("/", (req, res) => {
   );
 });
 
-// Health
+// ✅ Health
 app.get("/health", (req, res) => {
-  res.json({ ok: true, time: new Date().toISOString() });
+  res.json({
+    ok: true,
+    time: new Date().toISOString(),
+    queueLength: notifyQueue.length,
+    queueRunning,
+  });
 });
 
 // ✅ QR image endpoint
@@ -160,6 +222,7 @@ app.get("/qr-view", async (req, res) => {
           </div>
           <p>Jika QR expired, restart service Railway agar QR baru muncul.</p>
           <p>Generated: <code>${lastQRTime}</code></p>
+          <p>Queue: <code>${notifyQueue.length}</code></p>
         </div>
       </body>
     </html>
@@ -171,15 +234,6 @@ app.listen(PORT, () => console.log("✅ HTTP server running on", PORT));
 // ✅ Anti crash global
 process.on("unhandledRejection", (reason) => console.error("❌ Unhandled Rejection:", reason));
 process.on("uncaughtException", (err) => console.error("❌ Uncaught Exception:", err));
-
-// ✅ Safe send wrapper
-async function safeSend(sock, jid, payload) {
-  try {
-    await sock.sendMessage(jid, payload);
-  } catch (e) {
-    console.error("sendMessage error:", e?.message || e);
-  }
-}
 
 async function safeGroupMetadata(sock, groupId) {
   try {
@@ -322,6 +376,13 @@ async function startBot() {
 
       if (!violation.isViolation) return;
 
+      // ✅ throttle per grup
+      const now = Date.now();
+      if (lastNotifyByGroup[from] && now - lastNotifyByGroup[from] < GROUP_THROTTLE_MS) {
+        return;
+      }
+      lastNotifyByGroup[from] = now;
+
       const count = pushViolationCounter(from, config.violationWindowMinutes);
 
       let groupName = from;
@@ -361,20 +422,30 @@ async function startBot() {
         { buttonId: `KICK_NO|${caseId}`, buttonText: { displayText: "❌ TIDAK" }, type: 1 },
       ];
 
-      // ✅ send to admins DM
-      for (const admin of config.admins) {
-        await safeSend(sock, admin, { text: panel, buttons, headerType: 1 });
+      // ✅ send to ONE admin only via queue
+      const oneAdmin = pickOneAdmin();
+      if (oneAdmin) {
+        enqueueNotify({
+          sock,
+          toJid: oneAdmin,
+          payload: { text: panel, buttons, headerType: 1 },
+        });
       }
 
-      // ✅ risk alert
+      // ✅ risk alert (1 admin only, via queue)
       if (count >= config.riskAlertThreshold) {
-        for (const admin of config.admins) {
-          await safeSend(sock, admin, {
-            text:
-              `⚠️ *RISK ALERT*\n` +
-              `Grup: ${groupName}\n` +
-              `Sudah ${count} pelanggaran dalam ${config.violationWindowMinutes} menit.\n` +
-              `Saran: admin mute/tutup grup sementara.`,
+        const oneAdmin2 = pickOneAdmin();
+        if (oneAdmin2) {
+          enqueueNotify({
+            sock,
+            toJid: oneAdmin2,
+            payload: {
+              text:
+                `⚠️ *RISK ALERT*\n` +
+                `Grup: ${groupName}\n` +
+                `Sudah ${count} pelanggaran dalam ${config.violationWindowMinutes} menit.\n` +
+                `Saran: admin mute/tutup grup sementara.`,
+            },
           });
         }
       }
