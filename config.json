@@ -1,0 +1,14 @@
+{
+  "allowedGroupLink": "https://chat.whatsapp.com/KnkESJgEUKT5PEki4SpDD0",
+  "admins": [
+    "62895404147521@s.whatsapp.net",
+    "6281237381918@s.whatsapp.net",
+    "6285889200041@s.whatsapp.net",
+    "601129323365@s.whatsapp.net",
+    "6285701449359@s.whatsapp.net"
+  ],
+  "defaultTimezone": "WIB",
+  "closeHourWIB": 22,
+  "reminderMinutesBeforeClose": 15,
+  "caseExpireMinutes": 10
+}
