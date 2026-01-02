@@ -1,23 +1,25 @@
 # 🤖 WA Moderation Bot (Baileys) — V2 (Railway Ready)
 
-Bot WhatsApp moderasi grup berbasis **Node.js + Baileys**.  
-Fungsinya buat bantu admin grup nangkep spam link + stiker jomok, terus admin tinggal klik tombol buat kick.
+Bot WhatsApp moderasi grup berbasis **Node.js + Baileys**, khusus buat:
+✅ nangkep spam link / konten jomok  
+✅ auto delete pesan pelanggaran (kalau bot admin)  
+✅ admin dapet DM notif + tombol **YA Kick / Tidak**  
+✅ deteksi stiker jomok tanpa caption pakai **Sightengine NSFW API**  
+✅ aman dari limit karena ada **queue + delay + throttle**  
 
-✅ **Bot ga auto kick** (biar aman akun WA, admin yang decide)  
-✅ Bot bisa **auto delete pesan pelanggaran** (kalau bot admin)  
-✅ Ada fitur **NSFW detection** pakai Sightengine (stiker tanpa caption bisa ketangkep)
+> ⚠️ Bot ini **tidak auto kick** langsung. Bot cuma kasih tombol ke admin → admin yang decide (lebih aman dari banned).
 
 ---
 
 # 🚀 Fitur Utama
 
 ## ✅ Moderasi Grup
-- Deteksi **link tidak diizinkan**
-- Deteksi **kata / konten vulgar** (bukan makian biasa)
-- Deteksi **stiker / media NSFW** pakai **Sightengine**
-- Jika admin / owner grup yang ngirim → **diabaikan**
-- Deteksi dilakukan di grup → notif dikirim ke admin lewat DM
+- Deteksi **link selain group link resmi**
+- Deteksi kata/konten vulgar (bukan makian biasa)
+- Deteksi **stiker/foto/video NSFW** pakai **Sightengine**
+- Admin / owner yang ngirim pelanggaran → **diabaikan**
+- Semua notif dikirim ke admin melalui DM (private chat)
 
-## ✅ Notif Admin (DM) + Tombol Action
-Saat ada pelanggaran, admin akan dapet DM seperti ini:
+## ✅ Notif Admin (DM) + Tombol Kick
+Admin dapet DM seperti ini:
 
