@@ -1,4 +1,4 @@
-// ✅ FIX Baileys: "crypto is not defined" (Railway / Node 18+)
+// ✅ FIX Baileys: crypto undefined (Node 18+)
 const nodeCrypto = require("crypto");
 if (!globalThis.crypto) globalThis.crypto = nodeCrypto.webcrypto;
 
@@ -11,7 +11,6 @@ const {
 } = require("@whiskeysockets/baileys");
 
 const P = require("pino");
-const qrcodeTerminal = require("qrcode-terminal");
 const QRCode = require("qrcode");
 const express = require("express");
 const fs = require("fs");
@@ -26,35 +25,29 @@ const { formatTimeNow, jidToPhone } = require("./lib/helpers");
 const { handleAdminDecision, getGroupSettings, setGroupName } = require("./lib/actionHandler");
 const { startScheduler } = require("./lib/scheduler");
 
-// ✅ NSFW Sightengine
+// ✅ NSFW
 const { checkNSFW } = require("./lib/nsfwDetector");
 const { canCheck } = require("./lib/nsfwLimiter");
 
-// ✅ Railway: PORT ikut env (Railway biasanya 8080)
+// ✅ Railway PORT & AUTH PATH
 const PORT = Number(process.env.PORT || 8080);
-
-// ✅ auth path (Railway friendly)
 const AUTH_PATH = process.env.AUTH_PATH || "/tmp/auth";
 
-// ✅ nomor bot untuk pairing code
-const BOT_NUMBER = "6289531526042"; // tanpa +
+// ✅ nomor bot (untuk pairing code optional)
+const BOT_NUMBER = process.env.BOT_NUMBER || "6289531526042"; // tanpa +
 
 console.log("✅ Booting index.js...");
 console.log("✅ PORT:", PORT);
 console.log("✅ AUTH_PATH:", AUTH_PATH);
 
-// ✅ QR storage (in-memory)
 let latestQR = null;
 let latestQRDataURL = null;
 let lastQRTime = null;
 
-// ✅ status flags
 let lastConnectionState = "init";
 let lastDisconnectReason = null;
 
-// ✅ ======================================
-// ✅ QUEUE SYSTEM (anti spam)
-// ✅ ======================================
+// ✅ queue system
 const notifyQueue = [];
 let queueRunning = false;
 
@@ -69,14 +62,12 @@ function pickOneAdmin() {
 function sleep(ms) {
   return new Promise((res) => setTimeout(res, ms));
 }
-
 function randomDelay(min = 3000, max = 8000) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
 function enqueueNotify(job) {
   if (!job?.sock || !job?.toJid || !job?.payload) return;
-
   notifyQueue.push(job);
 
   const MAX_QUEUE = 50;
@@ -104,13 +95,10 @@ async function runQueue() {
   queueRunning = false;
 }
 
-// ✅ throttle per grup
 const lastNotifyByGroup = {};
 const GROUP_THROTTLE_MS = 20000;
 
-// ✅ ======================================
-// ✅ EXPRESS SERVER (START FIRST)
-// ✅ ======================================
+// ✅ EXPRESS SERVER
 const app = express();
 
 app.get("/", (req, res) => {
@@ -132,9 +120,10 @@ app.get("/health", (req, res) => {
     queueRunning,
     AUTH_PATH,
     env: {
+      PORT: process.env.PORT || null,
+      BOT_NUMBER: BOT_NUMBER || null,
       SIGHTENGINE_USER: process.env.SIGHTENGINE_USER ? "OK" : "EMPTY",
       SIGHTENGINE_SECRET: process.env.SIGHTENGINE_SECRET ? "OK" : "EMPTY",
-      PORT: process.env.PORT || null,
     },
   });
 });
@@ -148,22 +137,21 @@ app.get("/debug", (req, res) => {
   });
 });
 
-// ✅ QR PNG endpoint
+// ✅ QR PNG
 app.get("/qr", async (req, res) => {
   try {
     if (!latestQR) return res.status(404).send("QR belum tersedia. Tunggu bot generate QR.");
 
     const pngBuffer = await QRCode.toBuffer(latestQR, {
       type: "png",
-      width: 900,
-      margin: 6,
+      width: 1000,
+      margin: 8,
       errorCorrectionLevel: "H",
     });
 
     res.setHeader("Content-Type", "image/png");
     res.send(pngBuffer);
   } catch (e) {
-    console.error("QR endpoint error:", e?.message || e);
     res.status(500).send("QR endpoint error");
   }
 });
@@ -187,76 +175,52 @@ app.get("/qr-view", async (req, res) => {
           img {width:100%; max-width:420px; border-radius:12px; background:white; padding:14px;}
           .btns {display:flex; gap:10px; justify-content:center; margin-top:16px; flex-wrap:wrap;}
           a, button {border:0; cursor:pointer; text-decoration:none; color:white; background:#2563eb; padding:10px 14px; border-radius:10px; font-size:14px;}
-          a.secondary, button.secondary {background:#334155;}
+          a.secondary {background:#334155;}
           code {background:#0b1220; padding:4px 8px; border-radius:8px;}
         </style>
       </head>
       <body>
         <div class="card">
           <h2>Scan QR WhatsApp</h2>
-          <img src="/qr?t=${Date.now()}" />
+          <img src="${latestQRDataURL}" />
           <div class="btns">
             <button onclick="location.reload()">🔄 Reload</button>
-            <a class="secondary" href="/qr" target="_blank">📥 PNG HD</a>
-            <a class="secondary" href="/qr-text" target="_blank">📌 QR Text</a>
+            <a class="secondary" href="/qr" target="_blank">📥 PNG</a>
             <a class="secondary" href="/debug" target="_blank">🧠 Debug</a>
           </div>
           <p>Generated: <code>${lastQRTime}</code></p>
-          <p>Queue: <code>${notifyQueue.length}</code></p>
         </div>
+        <script>
+          setTimeout(()=>location.reload(), 5000);
+        </script>
       </body>
     </html>
   `);
 });
 
-// ✅ LISTEN
+// ✅ listen dulu baru bot
 app.listen(PORT, "0.0.0.0", () => {
   console.log("✅ HTTP server running on", PORT);
+  setTimeout(() => startBot().catch(console.error), 1500);
 });
 
-// ✅ Anti crash global
-process.on("unhandledRejection", (reason) => console.error("❌ Unhandled Rejection:", reason));
-process.on("uncaughtException", (err) => console.error("❌ Uncaught Exception:", err));
-
-// ✅ Helpers
-async function safeGroupMetadata(sock, groupId) {
-  try {
-    return await sock.groupMetadata(groupId);
-  } catch {
-    return null;
-  }
-}
-
-async function safeDeleteMessage(sock, groupId, key) {
-  try {
-    if (!key) return false;
-    await sock.sendMessage(groupId, { delete: key });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
+// ✅ ======================================
+// ✅ BOT SECTION
+// ✅ ======================================
 function resetAuthFolder() {
   try {
-    console.log("🧹 Resetting AUTH folder...");
+    console.log("🧹 Reset AUTH folder...");
     fs.rmSync(AUTH_PATH, { recursive: true, force: true });
     latestQR = null;
     latestQRDataURL = null;
-  } catch (e) {
-    console.error("resetAuthFolder error:", e?.message || e);
-  }
+    lastQRTime = null;
+  } catch {}
 }
 
-// ✅ ======================================
-// ✅ START BOT
-// ✅ ======================================
 let schedulerStarted = false;
 let isConnecting = false;
 
 async function startBot() {
-  console.log("🚀 startBot() called...");
-
   if (isConnecting) return;
   isConnecting = true;
 
@@ -265,11 +229,9 @@ async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_PATH);
   const { version } = await fetchLatestBaileysVersion();
 
-  console.log("✅ Baileys version:", version);
-
   const sock = makeWASocket({
     version,
-    logger: P({ level: "silent" }),
+    logger: P({ level: "info" }),
     auth: state,
     markOnlineOnConnect: false,
     syncFullHistory: false,
@@ -277,15 +239,14 @@ async function startBot() {
 
   sock.ev.on("creds.update", saveCreds);
 
-  // ✅ Pairing Code login (tanpa QR)
+  // ✅ Pairing code optional (kalau gagal => fallback QR)
   if (!state.creds.registered) {
     try {
-      console.log("📌 Request pairing code for:", BOT_NUMBER);
+      console.log("📌 Request pairing code:", BOT_NUMBER);
       const code = await sock.requestPairingCode(BOT_NUMBER);
       console.log("✅ PAIRING CODE:", code);
-      console.log("📌 Masukin code ini di WA HP -> Perangkat tertaut -> Tautkan dengan nomor telepon");
     } catch (e) {
-      console.error("❌ requestPairingCode error:", e?.message || e);
+      console.log("⚠️ Pairing code gagal, fallback QR...");
     }
   }
 
@@ -293,14 +254,18 @@ async function startBot() {
     const { connection, lastDisconnect, qr } = update;
 
     lastConnectionState = connection || lastConnectionState;
+    console.log("🔌 connection.update:", { connection, hasQR: !!qr });
 
     if (qr) {
       latestQR = qr;
       lastQRTime = new Date().toISOString();
-      console.log("📌 QR generated! Open /qr-view to scan.");
 
       try {
-        latestQRDataURL = await QRCode.toDataURL(qr, { width: 520, margin: 4, errorCorrectionLevel: "H" });
+        latestQRDataURL = await QRCode.toDataURL(qr, {
+          width: 520,
+          margin: 4,
+          errorCorrectionLevel: "H",
+        });
       } catch {}
     }
 
@@ -314,165 +279,27 @@ async function startBot() {
         schedulerStarted = true;
         startScheduler(sock, config, getGroupSettings);
       }
-
       isConnecting = false;
     }
 
     if (connection === "close") {
       const code = lastDisconnect?.error?.output?.statusCode;
       const reason = lastDisconnect?.error?.message || lastDisconnect?.error?.toString();
-
       lastDisconnectReason = { code, reason };
 
-      console.log("⚠️ Connection closed:", code);
-      console.log("📌 Close reason:", reason);
+      console.log("⚠️ Connection closed:", code, reason);
 
-      // ✅ FIX conflict: auto reset auth folder
       if (String(reason || "").toLowerCase().includes("conflict")) {
-        console.log("⚠️ Conflict detected! Reset auth & generate new QR...");
         resetAuthFolder();
-        isConnecting = false;
-        return setTimeout(() => startBot().catch(console.error), 5000);
       }
-
       if (code === DisconnectReason.loggedOut) {
-        console.log("❌ Logged out. Delete auth folder and scan QR again.");
         resetAuthFolder();
-        isConnecting = false;
-        return setTimeout(() => startBot().catch(console.error), 5000);
       }
 
       isConnecting = false;
-      console.log("🔁 Reconnecting in 5 seconds...");
       setTimeout(() => startBot().catch(console.error), 5000);
-    }
-  });
-
-  // ✅ message handler (punya kamu tetap)
-  sock.ev.on("messages.upsert", async ({ messages }) => {
-    try {
-      const msg = messages?.[0];
-      if (!msg?.message) return;
-
-      const from = msg.key.remoteJid;
-
-      if (!from.endsWith("@g.us")) {
-        await handleAdminDecision(sock, msg).catch(() => {});
-        return;
-      }
-
-      const sender = msg.key.participant;
-      if (!sender) return;
-
-      if (config.admins.includes(sender)) return;
-
-      const text =
-        msg.message?.conversation ||
-        msg.message?.extendedTextMessage?.text ||
-        msg.message?.imageMessage?.caption ||
-        msg.message?.videoMessage?.caption ||
-        "";
-
-      const bannedWords = getBannedWords();
-
-      let violation = detectViolation({ text, allowedGroupLink: config.allowedGroupLink, bannedWords });
-
-      const isSticker = !!msg.message?.stickerMessage;
-      const isImage = !!msg.message?.imageMessage;
-      const isVideo = !!msg.message?.videoMessage;
-
-      if (!violation.isViolation && (isSticker || isImage || isVideo)) {
-        const found = bannedWords.find((w) => text.toLowerCase().includes(w.toLowerCase()));
-        if (found) violation = { isViolation: true, type: "Media/Stiker Vulgar", evidence: found };
-      }
-
-      if (!violation.isViolation && config.nsfwDetection?.enabled && (isSticker || isImage || isVideo)) {
-        const maxPerMinute = Number(process.env.NSFW_MAX_PER_MINUTE || config.nsfwDetection.maxChecksPerMinute || 8);
-        if (canCheck(maxPerMinute)) {
-          try {
-            const buffer = await downloadMediaMessage(msg, "buffer", {});
-            const result = await checkNSFW(buffer, config.nsfwDetection);
-            if (result.isNSFW) {
-              violation = {
-                isViolation: true,
-                type: "Stiker/Media NSFW",
-                evidence: `NSFW Score: ${(result.score * 100).toFixed(1)}%`,
-              };
-            }
-          } catch {}
-        }
-      }
-
-      if (!violation.isViolation) return;
-
-      const now = Date.now();
-      if (lastNotifyByGroup[from] && now - lastNotifyByGroup[from] < GROUP_THROTTLE_MS) return;
-      lastNotifyByGroup[from] = now;
-
-      if (config.autoDeleteViolationMessage) {
-        await safeDeleteMessage(sock, from, msg.key);
-      }
-
-      const count = pushViolationCounter(from, config.violationWindowMinutes);
-
-      let groupName = from;
-      const meta = await safeGroupMetadata(sock, from);
-      if (meta?.subject) {
-        groupName = meta.subject;
-        setGroupName(from, groupName);
-      }
-
-      const tz = getGroupSettings()[from]?.timezone || config.defaultTimezone;
-      const timeStr = formatTimeNow(tz);
-
-      const caseId = createCase(
-        {
-          groupId: from,
-          groupName,
-          userJid: sender,
-          violatorPhone: jidToPhone(sender),
-          violationType: violation.type,
-          evidence: violation.evidence,
-          timeStr,
-          violationMsgKey: msg.key,
-        },
-        config.caseExpireMinutes
-      );
-
-      const panel = buildViolationPanel({
-        groupName,
-        violatorPhone: jidToPhone(sender),
-        violationType: violation.type,
-        evidence: violation.evidence,
-        timeStr,
-      });
-
-      const buttons = [
-        { buttonId: `KICK_YA|${caseId}`, buttonText: { displayText: "✅ YA (KICK)" }, type: 1 },
-        { buttonId: `KICK_NO|${caseId}`, buttonText: { displayText: "❌ TIDAK" }, type: 1 },
-      ];
-
-      const oneAdmin = pickOneAdmin();
-      if (oneAdmin) {
-        enqueueNotify({
-          sock,
-          toJid: oneAdmin,
-          payload: { text: panel, buttons, headerType: 1 },
-        });
-      }
-    } catch (e) {
-      console.error("messages.upsert error:", e?.message || e);
     }
   });
 
   isConnecting = false;
 }
-
-// ✅ Start bot after server running
-setTimeout(() => {
-  startBot().catch((e) => {
-    console.error("❌ startBot fatal error:", e?.message || e);
-    isConnecting = false;
-    setTimeout(() => startBot().catch(console.error), 5000);
-  });
-}, 1500);
