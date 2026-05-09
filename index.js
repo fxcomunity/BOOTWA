@@ -242,7 +242,7 @@ async function startBot() {
     version,
     logger: P({ level: "info" }),
     auth: state,
-    browser: ["YuraCloud", "Chrome", "1.0.0"],
+    browser: Browsers.ubuntu('Chrome'),
     markOnlineOnConnect: false,
     syncFullHistory: false,
   });
