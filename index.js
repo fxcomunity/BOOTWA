@@ -24,6 +24,9 @@ const { buildViolationPanel } = require("./lib/uiPanel");
 const { formatTimeNow, jidToPhone } = require("./lib/helpers");
 const { handleAdminDecision, getGroupSettings, setGroupName } = require("./lib/actionHandler");
 const { startScheduler } = require("./lib/scheduler");
+const { handleCommands } = require("./lib/commandHandler");
+const { isGroupBlacklisted } = require("./lib/groupBlacklist");
+const { readJSON } = require("./lib/storage");
 
 // ✅ NSFW
 const { checkNSFW } = require("./lib/nsfwDetector");
@@ -43,9 +46,9 @@ console.log("✅ AUTH_PATH:", AUTH_PATH);
 let latestQR = null;
 let latestQRDataURL = null;
 let lastQRTime = null;
-
 let lastConnectionState = "init";
 let lastDisconnectReason = null;
+const startTime = Date.now();
 
 // ✅ queue system
 const notifyQueue = [];
@@ -233,6 +236,7 @@ async function startBot() {
     version,
     logger: P({ level: "info" }),
     auth: state,
+    browser: ["Windows", "Chrome", "20.0.04"],
     markOnlineOnConnect: false,
     syncFullHistory: false,
   });
@@ -241,13 +245,15 @@ async function startBot() {
 
   // ✅ Pairing code optional (kalau gagal => fallback QR)
   if (!state.creds.registered) {
-    try {
-      console.log("📌 Request pairing code:", BOT_NUMBER);
-      const code = await sock.requestPairingCode(BOT_NUMBER);
-      console.log("✅ PAIRING CODE:", code);
-    } catch (e) {
-      console.log("⚠️ Pairing code gagal, fallback QR...");
-    }
+    setTimeout(async () => {
+      try {
+        console.log("📌 Request pairing code:", BOT_NUMBER);
+        const code = await sock.requestPairingCode(BOT_NUMBER);
+        console.log("✅ PAIRING CODE:", code);
+      } catch (e) {
+        console.log("⚠️ Pairing code gagal, fallback QR...");
+      }
+    }, 4000);
   }
 
   sock.ev.on("connection.update", async (update) => {
@@ -279,7 +285,6 @@ async function startBot() {
         schedulerStarted = true;
         startScheduler(sock, config, getGroupSettings);
       }
-      isConnecting = false;
     }
 
     if (connection === "close") {
@@ -298,6 +303,114 @@ async function startBot() {
 
       isConnecting = false;
       setTimeout(() => startBot().catch(console.error), 5000);
+    }
+  });
+
+  // ✅ MESSAGES HANDLER
+  sock.ev.on("messages.upsert", async ({ messages, type }) => {
+    if (type !== "notify") return;
+
+        for (const msg of messages) {
+          try {
+            if (!msg.message || msg.key.fromMe) continue;
+            const from = msg.key.remoteJid;
+            if (!from) continue;
+
+            // Skip blacklisted groups
+            if (from.endsWith("@g.us") && isGroupBlacklisted(from)) continue;
+
+            // ✅ Route commands first
+            const cmdHandled = await handleCommands(sock, msg, { notifyQueue, startTime });
+            if (cmdHandled) continue;
+
+            // ✅ Handle admin button decisions (DM only)
+            if (!from.endsWith("@g.us")) {
+              await handleAdminDecision(sock, msg);
+              continue;
+            }
+
+            // ✅ Group moderation below
+            const sender = msg.key.participant;
+            if (!sender) continue;
+
+            // Skip bot admins from moderation
+            const isAdminBot = config.admins.includes(sender);
+            if (isAdminBot) continue;
+
+            const groupSettings = getGroupSettings();
+            const grpSettings = groupSettings[from] || {};
+
+            // Update group name
+            const groupMeta = await sock.groupMetadata(from).catch(() => null);
+            if (groupMeta?.subject) setGroupName(from, groupMeta.subject);
+            const groupName = groupMeta?.subject || from;
+
+            const now = Date.now();
+            const lastNotify = lastNotifyByGroup[from] || 0;
+            const isThrottled = (now - lastNotify) < GROUP_THROTTLE_MS;
+
+            const body =
+              msg.message?.conversation ||
+              msg.message?.extendedTextMessage?.text ||
+              msg.message?.imageMessage?.caption ||
+              msg.message?.videoMessage?.caption ||
+              "";
+
+            const bannedWords = getBannedWords();
+            const antilink = grpSettings.antilink !== false; // default on
+
+            // ✅ Text/link detection
+            if (body) {
+              const { isViolation, type: vtype, evidence } = detectViolation({
+                text: body,
+                allowedGroupLink: antilink ? config.allowedGroupLink : null,
+                bannedWords,
+              });
+
+              if (isViolation) {
+                const count = pushViolationCounter(from, config.violationWindowMinutes);
+                const timeStr = formatTimeNow(config.defaultTimezone);
+                const violatorPhone = jidToPhone(sender);
+                const caseId = createCase({ groupId: from, groupName, userJid: sender, violatorPhone, violationType: vtype, evidence, timeStr, violationMsgKey: msg.key });
+                const adminJid = pickOneAdmin();
+
+                if (adminJid && !isThrottled) {
+                  lastNotifyByGroup[from] = now;
+                  const panel = buildViolationPanel({ caseId, groupName, violatorPhone, vtype, evidence, timeStr, count, riskAlertThreshold: config.riskAlertThreshold, violationWindowMinutes: config.violationWindowMinutes });
+                  enqueueNotify({ sock, toJid: adminJid, payload: panel });
+                }
+                continue;
+              }
+            }
+
+            // ✅ NSFW media detection
+            const antinsfw = grpSettings.antinsfw !== false; // default on
+            if (!antinsfw) continue;
+            if (!config.nsfwDetection?.enabled) continue;
+
+            const hasMedia = msg.message?.imageMessage || msg.message?.stickerMessage || msg.message?.videoMessage;
+            if (!hasMedia) continue;
+            if (!canCheck()) continue;
+
+            const mediaBuffer = await downloadMediaMessage(msg, "buffer", {}).catch(() => null);
+            if (!mediaBuffer) continue;
+
+            const nsfwResult = await checkNSFW(mediaBuffer, config.nsfwDetection).catch(() => null);
+            if (!nsfwResult?.isNSFW) continue;
+
+            const timeStr = formatTimeNow(config.defaultTimezone);
+            const violatorPhone = jidToPhone(sender);
+            const caseId = createCase({ groupId: from, groupName, userJid: sender, violatorPhone, violationType: "Konten NSFW/Vulgar", evidence: `NSFW score: ${nsfwResult.score}`, timeStr, violationMsgKey: msg.key });
+            const adminJid = pickOneAdmin();
+
+            if (adminJid && !isThrottled) {
+              lastNotifyByGroup[from] = now;
+              const panel = buildViolationPanel({ caseId, groupName, violatorPhone, vtype: "Konten NSFW", evidence: `Score: ${nsfwResult.score}`, timeStr, count: 1, riskAlertThreshold: config.riskAlertThreshold, violationWindowMinutes: config.violationWindowMinutes });
+              enqueueNotify({ sock, toJid: adminJid, payload: panel });
+            }
+      } catch(e) {
+        console.error("messages.upsert error:", e?.message || e);
+      }
     }
   });
 

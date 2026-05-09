@@ -1,4 +1,6 @@
 {
+  "botNumber": "6289531526042",
+  "owner": "62895404147521@s.whatsapp.net",
   "allowedGroupLink": "https://chat.whatsapp.com/KnkESJgEUKT5PEki4SpDD0",
   "admins": [
     "62895404147521@s.whatsapp.net",
@@ -7,18 +9,15 @@
     "601129323365@s.whatsapp.net",
     "6285701449359@s.whatsapp.net"
   ],
-
+  "prefix": ".",
   "defaultTimezone": "WIB",
   "closeHourWIB": 22,
-
   "caseExpireMinutes": 10,
   "violationWindowMinutes": 10,
   "riskAlertThreshold": 3,
-
   "adminLogGroupId": "",
   "kickAnnounceInGroup": true,
   "autoDeleteViolationMessage": true,
-
   "nsfwDetection": {
     "enabled": true,
     "provider": "sightengine",
