@@ -249,6 +249,22 @@ async function startBot() {
 
   sock.ev.on("creds.update", saveCreds);
 
+  // ✅ Pairing Code (Anti "Perangkat tidak ditemukan")
+  if (!state.creds.registered) {
+    setTimeout(async () => {
+      try {
+        console.log("📌 Request pairing code untuk:", BOT_NUMBER);
+        const code = await sock.requestPairingCode(BOT_NUMBER);
+        console.log("\n=========================================");
+        console.log("✅ KODE PAIRING ANDA:", code);
+        console.log("👉 Buka WhatsApp > Perangkat Tertaut > Tautkan dengan Nomor Telepon");
+        console.log("=========================================\n");
+      } catch (e) {
+        console.log("⚠️ Pairing code gagal:", e?.message);
+      }
+    }, 4000);
+  }
+
   sock.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect, qr } = update;
 
