@@ -34,7 +34,7 @@ const { canCheck } = require("./lib/nsfwLimiter");
 
 // ✅ Railway PORT & AUTH PATH
 const PORT = Number(process.env.PORT || process.env.SERVER_PORT || 8080);
-const AUTH_PATH = process.env.AUTH_PATH || "/tmp/auth";
+const AUTH_PATH = process.env.AUTH_PATH || "./auth_session";
 
 // ✅ nomor bot (untuk pairing code optional)
 const BOT_NUMBER = process.env.BOT_NUMBER || "6289531526042"; // tanpa +
@@ -242,7 +242,7 @@ async function startBot() {
     version,
     logger: P({ level: "info" }),
     auth: state,
-    browser: Browsers.macOS('Desktop'),
+    browser: ["YuraCloud", "Chrome", "1.0.0"],
     markOnlineOnConnect: false,
     syncFullHistory: false,
   });
