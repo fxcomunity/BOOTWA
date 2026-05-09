@@ -1,13 +1,13 @@
 // ✅ FIX Baileys: crypto undefined (Node 18+)
 const nodeCrypto = require("crypto");
 if (!globalThis.crypto) globalThis.crypto = nodeCrypto.webcrypto;
-
 const makeWASocket = require("@whiskeysockets/baileys").default;
 const {
   useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion,
   downloadMediaMessage,
+  Browsers,
 } = require("@whiskeysockets/baileys");
 
 const P = require("pino");
@@ -54,6 +54,7 @@ fetch("https://api.ipify.org?format=json")
 let latestQR = null;
 let latestQRDataURL = null;
 let lastQRTime = null;
+
 let lastConnectionState = "init";
 let lastDisconnectReason = null;
 const startTime = Date.now();
@@ -195,15 +196,12 @@ app.get("/qr-view", async (req, res) => {
           <h2>Scan QR WhatsApp</h2>
           <img src="${latestQRDataURL}" />
           <div class="btns">
-            <button onclick="location.reload()">🔄 Reload</button>
+            <button onclick="location.reload()">🔄 Refresh QR</button>
             <a class="secondary" href="/qr" target="_blank">📥 PNG</a>
             <a class="secondary" href="/debug" target="_blank">🧠 Debug</a>
           </div>
           <p>Generated: <code>${lastQRTime}</code></p>
         </div>
-        <script>
-          setTimeout(()=>location.reload(), 5000);
-        </script>
       </body>
     </html>
   `);
@@ -244,14 +242,12 @@ async function startBot() {
     version,
     logger: P({ level: "info" }),
     auth: state,
-    browser: ["Windows", "Chrome", "20.0.04"],
+    browser: Browsers.macOS('Desktop'),
     markOnlineOnConnect: false,
     syncFullHistory: false,
   });
 
   sock.ev.on("creds.update", saveCreds);
-
-
 
   sock.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect, qr } = update;
