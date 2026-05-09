@@ -1,14 +1,17 @@
 // ✅ FIX Baileys: crypto undefined (Node 18+)
 const nodeCrypto = require("crypto");
 if (!globalThis.crypto) globalThis.crypto = nodeCrypto.webcrypto;
-const makeWASocket = require("@whiskeysockets/baileys").default;
-const {
-  useMultiFileAuthState,
-  DisconnectReason,
-  fetchLatestBaileysVersion,
-  downloadMediaMessage,
-  Browsers,
-} = require("@whiskeysockets/baileys");
+let makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, downloadMediaMessage, Browsers;
+
+async function initBaileys() {
+  const baileys = await import("@whiskeysockets/baileys");
+  makeWASocket = baileys.default;
+  useMultiFileAuthState = baileys.useMultiFileAuthState;
+  DisconnectReason = baileys.DisconnectReason;
+  fetchLatestBaileysVersion = baileys.fetchLatestBaileysVersion;
+  downloadMediaMessage = baileys.downloadMediaMessage;
+  Browsers = baileys.Browsers;
+}
 
 const P = require("pino");
 const QRCode = require("qrcode");
@@ -208,9 +211,14 @@ app.get("/qr-view", async (req, res) => {
 });
 
 // ✅ listen dulu baru bot
-app.listen(PORT, "0.0.0.0", () => {
+app.listen(PORT, "0.0.0.0", async () => {
   console.log("✅ HTTP server running on", PORT);
-  setTimeout(() => startBot().catch(console.error), 1500);
+  try {
+    await initBaileys();
+    setTimeout(() => startBot().catch(console.error), 1500);
+  } catch (e) {
+    console.error("Gagal inisiasi Baileys:", e);
+  }
 });
 
 // ✅ ======================================
