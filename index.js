@@ -33,7 +33,7 @@ const { checkNSFW } = require("./lib/nsfwDetector");
 const { canCheck } = require("./lib/nsfwLimiter");
 
 // ✅ Railway PORT & AUTH PATH
-const PORT = Number(process.env.PORT || 8080);
+const PORT = Number(process.env.PORT || process.env.SERVER_PORT || 8080);
 const AUTH_PATH = process.env.AUTH_PATH || "/tmp/auth";
 
 // ✅ nomor bot (untuk pairing code optional)
@@ -107,11 +107,11 @@ const app = express();
 app.get("/", (req, res) => {
   res.send(
     "OK - WA Moderation Bot Running ✅\n\n" +
-      "Open /qr-view to scan QR\n" +
-      "Open /qr for PNG\n" +
-      "Open /qr-text for QR string\n" +
-      "Open /health for status\n" +
-      "Open /debug for bot debug\n"
+    "Open /qr-view to scan QR\n" +
+    "Open /qr for PNG\n" +
+    "Open /qr-text for QR string\n" +
+    "Open /health for status\n" +
+    "Open /debug for bot debug\n"
   );
 });
 
@@ -217,7 +217,7 @@ function resetAuthFolder() {
     latestQR = null;
     latestQRDataURL = null;
     lastQRTime = null;
-  } catch {}
+  } catch { }
 }
 
 let schedulerStarted = false;
@@ -261,7 +261,7 @@ async function startBot() {
           margin: 4,
           errorCorrectionLevel: "H",
         });
-      } catch {}
+      } catch { }
     }
 
     if (connection === "open") {
@@ -299,105 +299,105 @@ async function startBot() {
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
     if (type !== "notify") return;
 
-        for (const msg of messages) {
-          try {
-            if (!msg.message || msg.key.fromMe) continue;
-            const from = msg.key.remoteJid;
-            if (!from) continue;
+    for (const msg of messages) {
+      try {
+        if (!msg.message || msg.key.fromMe) continue;
+        const from = msg.key.remoteJid;
+        if (!from) continue;
 
-            // Skip blacklisted groups
-            if (from.endsWith("@g.us") && isGroupBlacklisted(from)) continue;
+        // Skip blacklisted groups
+        if (from.endsWith("@g.us") && isGroupBlacklisted(from)) continue;
 
-            // ✅ Route commands first
-            const cmdHandled = await handleCommands(sock, msg, { notifyQueue, startTime });
-            if (cmdHandled) continue;
+        // ✅ Route commands first
+        const cmdHandled = await handleCommands(sock, msg, { notifyQueue, startTime });
+        if (cmdHandled) continue;
 
-            // ✅ Handle admin button decisions (DM only)
-            if (!from.endsWith("@g.us")) {
-              await handleAdminDecision(sock, msg);
-              continue;
-            }
+        // ✅ Handle admin button decisions (DM only)
+        if (!from.endsWith("@g.us")) {
+          await handleAdminDecision(sock, msg);
+          continue;
+        }
 
-            // ✅ Group moderation below
-            const sender = msg.key.participant;
-            if (!sender) continue;
+        // ✅ Group moderation below
+        const sender = msg.key.participant;
+        if (!sender) continue;
 
-            // Skip bot admins from moderation
-            const isAdminBot = config.admins.includes(sender);
-            if (isAdminBot) continue;
+        // Skip bot admins from moderation
+        const isAdminBot = config.admins.includes(sender);
+        if (isAdminBot) continue;
 
-            const groupSettings = getGroupSettings();
-            const grpSettings = groupSettings[from] || {};
+        const groupSettings = getGroupSettings();
+        const grpSettings = groupSettings[from] || {};
 
-            // Update group name
-            const groupMeta = await sock.groupMetadata(from).catch(() => null);
-            if (groupMeta?.subject) setGroupName(from, groupMeta.subject);
-            const groupName = groupMeta?.subject || from;
+        // Update group name
+        const groupMeta = await sock.groupMetadata(from).catch(() => null);
+        if (groupMeta?.subject) setGroupName(from, groupMeta.subject);
+        const groupName = groupMeta?.subject || from;
 
-            const now = Date.now();
-            const lastNotify = lastNotifyByGroup[from] || 0;
-            const isThrottled = (now - lastNotify) < GROUP_THROTTLE_MS;
+        const now = Date.now();
+        const lastNotify = lastNotifyByGroup[from] || 0;
+        const isThrottled = (now - lastNotify) < GROUP_THROTTLE_MS;
 
-            const body =
-              msg.message?.conversation ||
-              msg.message?.extendedTextMessage?.text ||
-              msg.message?.imageMessage?.caption ||
-              msg.message?.videoMessage?.caption ||
-              "";
+        const body =
+          msg.message?.conversation ||
+          msg.message?.extendedTextMessage?.text ||
+          msg.message?.imageMessage?.caption ||
+          msg.message?.videoMessage?.caption ||
+          "";
 
-            const bannedWords = getBannedWords();
-            const antilink = grpSettings.antilink !== false; // default on
+        const bannedWords = getBannedWords();
+        const antilink = grpSettings.antilink !== false; // default on
 
-            // ✅ Text/link detection
-            if (body) {
-              const { isViolation, type: vtype, evidence } = detectViolation({
-                text: body,
-                allowedGroupLink: antilink ? config.allowedGroupLink : null,
-                bannedWords,
-              });
+        // ✅ Text/link detection
+        if (body) {
+          const { isViolation, type: vtype, evidence } = detectViolation({
+            text: body,
+            allowedGroupLink: antilink ? config.allowedGroupLink : null,
+            bannedWords,
+          });
 
-              if (isViolation) {
-                const count = pushViolationCounter(from, config.violationWindowMinutes);
-                const timeStr = formatTimeNow(config.defaultTimezone);
-                const violatorPhone = jidToPhone(sender);
-                const caseId = createCase({ groupId: from, groupName, userJid: sender, violatorPhone, violationType: vtype, evidence, timeStr, violationMsgKey: msg.key });
-                const adminJid = pickOneAdmin();
-
-                if (adminJid && !isThrottled) {
-                  lastNotifyByGroup[from] = now;
-                  const panel = buildViolationPanel({ caseId, groupName, violatorPhone, vtype, evidence, timeStr, count, riskAlertThreshold: config.riskAlertThreshold, violationWindowMinutes: config.violationWindowMinutes });
-                  enqueueNotify({ sock, toJid: adminJid, payload: panel });
-                }
-                continue;
-              }
-            }
-
-            // ✅ NSFW media detection
-            const antinsfw = grpSettings.antinsfw !== false; // default on
-            if (!antinsfw) continue;
-            if (!config.nsfwDetection?.enabled) continue;
-
-            const hasMedia = msg.message?.imageMessage || msg.message?.stickerMessage || msg.message?.videoMessage;
-            if (!hasMedia) continue;
-            if (!canCheck()) continue;
-
-            const mediaBuffer = await downloadMediaMessage(msg, "buffer", {}).catch(() => null);
-            if (!mediaBuffer) continue;
-
-            const nsfwResult = await checkNSFW(mediaBuffer, config.nsfwDetection).catch(() => null);
-            if (!nsfwResult?.isNSFW) continue;
-
+          if (isViolation) {
+            const count = pushViolationCounter(from, config.violationWindowMinutes);
             const timeStr = formatTimeNow(config.defaultTimezone);
             const violatorPhone = jidToPhone(sender);
-            const caseId = createCase({ groupId: from, groupName, userJid: sender, violatorPhone, violationType: "Konten NSFW/Vulgar", evidence: `NSFW score: ${nsfwResult.score}`, timeStr, violationMsgKey: msg.key });
+            const caseId = createCase({ groupId: from, groupName, userJid: sender, violatorPhone, violationType: vtype, evidence, timeStr, violationMsgKey: msg.key });
             const adminJid = pickOneAdmin();
 
             if (adminJid && !isThrottled) {
               lastNotifyByGroup[from] = now;
-              const panel = buildViolationPanel({ caseId, groupName, violatorPhone, vtype: "Konten NSFW", evidence: `Score: ${nsfwResult.score}`, timeStr, count: 1, riskAlertThreshold: config.riskAlertThreshold, violationWindowMinutes: config.violationWindowMinutes });
+              const panel = buildViolationPanel({ caseId, groupName, violatorPhone, vtype, evidence, timeStr, count, riskAlertThreshold: config.riskAlertThreshold, violationWindowMinutes: config.violationWindowMinutes });
               enqueueNotify({ sock, toJid: adminJid, payload: panel });
             }
-      } catch(e) {
+            continue;
+          }
+        }
+
+        // ✅ NSFW media detection
+        const antinsfw = grpSettings.antinsfw !== false; // default on
+        if (!antinsfw) continue;
+        if (!config.nsfwDetection?.enabled) continue;
+
+        const hasMedia = msg.message?.imageMessage || msg.message?.stickerMessage || msg.message?.videoMessage;
+        if (!hasMedia) continue;
+        if (!canCheck()) continue;
+
+        const mediaBuffer = await downloadMediaMessage(msg, "buffer", {}).catch(() => null);
+        if (!mediaBuffer) continue;
+
+        const nsfwResult = await checkNSFW(mediaBuffer, config.nsfwDetection).catch(() => null);
+        if (!nsfwResult?.isNSFW) continue;
+
+        const timeStr = formatTimeNow(config.defaultTimezone);
+        const violatorPhone = jidToPhone(sender);
+        const caseId = createCase({ groupId: from, groupName, userJid: sender, violatorPhone, violationType: "Konten NSFW/Vulgar", evidence: `NSFW score: ${nsfwResult.score}`, timeStr, violationMsgKey: msg.key });
+        const adminJid = pickOneAdmin();
+
+        if (adminJid && !isThrottled) {
+          lastNotifyByGroup[from] = now;
+          const panel = buildViolationPanel({ caseId, groupName, violatorPhone, vtype: "Konten NSFW", evidence: `Score: ${nsfwResult.score}`, timeStr, count: 1, riskAlertThreshold: config.riskAlertThreshold, violationWindowMinutes: config.violationWindowMinutes });
+          enqueueNotify({ sock, toJid: adminJid, payload: panel });
+        }
+      } catch (e) {
         console.error("messages.upsert error:", e?.message || e);
       }
     }
