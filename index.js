@@ -43,6 +43,14 @@ console.log("✅ Booting index.js...");
 console.log("✅ PORT:", PORT);
 console.log("✅ AUTH_PATH:", AUTH_PATH);
 
+// Fetch public IP to help user
+fetch("https://api.ipify.org?format=json")
+  .then(res => res.json())
+  .then(data => {
+    console.log(`\n🌐 [LINK QR CODE]: http://${data.ip}:${PORT}/qr-view\n`);
+  })
+  .catch(() => console.log("⚠️ Gagal mengambil IP Publik"));
+
 let latestQR = null;
 let latestQRDataURL = null;
 let lastQRTime = null;
