@@ -243,18 +243,7 @@ async function startBot() {
 
   sock.ev.on("creds.update", saveCreds);
 
-  // ✅ Pairing code optional (kalau gagal => fallback QR)
-  if (!state.creds.registered) {
-    setTimeout(async () => {
-      try {
-        console.log("📌 Request pairing code:", BOT_NUMBER);
-        const code = await sock.requestPairingCode(BOT_NUMBER);
-        console.log("✅ PAIRING CODE:", code);
-      } catch (e) {
-        console.log("⚠️ Pairing code gagal, fallback QR...");
-      }
-    }, 4000);
-  }
+
 
   sock.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect, qr } = update;
