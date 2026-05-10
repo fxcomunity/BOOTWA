@@ -11,12 +11,14 @@
     "node": "18.x"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.7.9",
+    "@google/generative-ai": "^0.24.1",
     "axios": "^1.16.0",
     "express": "^4.19.2",
     "moment-timezone": "^0.5.45",
     "pino": "^9.0.0",
+    "puppeteer": "^22.0.0",
     "qrcode": "^1.5.3",
-    "qrcode-terminal": "^0.12.0"
+    "qrcode-terminal": "^0.12.0",
+    "whatsapp-web.js": "^1.34.7"
   }
 }

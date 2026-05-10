@@ -23,5 +23,6 @@
     "provider": "sightengine",
     "threshold": 0.65,
     "maxChecksPerMinute": 8
-  }
+  },
+  "geminiApiKey": ""
 }
